@@ -23,8 +23,13 @@ class FDTD1D:
         self.bounds = bounds
         self.e = np.zeros_like(self.xE)
         self.h = np.zeros_like(self.xH)
+        self.h_old = np.zeros_like(self.h)
         self.eps = np.ones_like(self.xE)  # Default permittivity is 1 everywhere
+        self.cond = np.zeros_like(self.xE)  # Default conductivity is 0 everywheree
         self.initialized = False
+        self.energyE = []
+        self.energyH = []
+        self.energy = []
 
     def set_initial_condition(self, initial_condition):
         self.e[:] = initial_condition[:]
@@ -42,6 +47,18 @@ class FDTD1D:
             end_idx = np.searchsorted(self.xE, end_x)
             self.eps[start_idx:end_idx] = eps_value
 
+    def set_conductivity_regions(self, regions):
+        """Set different conductivity regions in the grid.
+        
+        Args:
+            regions: List of tuples (start_x, end_x, cond_a_value) defining regions
+                    with different conductivity values.
+        """
+        for start_x, end_x, cond_value in regions:
+            start_idx = np.searchsorted(self.xE, start_x)
+            end_idx = np.searchsorted(self.xE, end_x)
+            self.cond[start_idx:end_idx] = cond_value
+
     def step(self, dt):
         if not self.initialized:
             raise RuntimeError(
@@ -51,7 +68,7 @@ class FDTD1D:
         self.e_old_right = self.e[-2]
 
         self.h[:] = self.h[:] - dt / self.dx / MU0 * (self.e[1:] - self.e[:-1])
-        self.e[1:-1] = self.e[1:-1] - dt / self.dx / self.eps[1:-1] * (self.h[1:] - self.h[:-1])
+        self.e[1:-1] = ( 1 / ((self.eps[1:-1] / dt) + (self.cond[1:-1] / 2)) ) * ( ( (self.eps[1:-1]/dt) - (self.cond[1:-1]/2) ) * self.e[1:-1] - 1 / self.dx * (self.h[1:] - self.h[:-1]) )
 
         if self.bounds[0] == 'pec':
             self.e[0] = 0.0
@@ -76,6 +93,12 @@ class FDTD1D:
             self.e[-1] = self.e[1]
         else:
             raise ValueError(f"Unknown boundary condition: {self.bounds[1]}")
+        
+        # Energy calculation
+        self.energyE.append(0.5 * np.dot(self.e, self.dx * self.eps * self.e))
+        self.energyH.append(0.5 * np.dot(self.h_old, self.dx * MU0 * self.h))
+        self.energy.append(0.5 * np.dot(self.e, self.dx * self.eps * self.e) + 0.5 * np.dot(self.h_old, self.dx * MU0 * self.h))
+        self.h_old[:] = self.h[:]
 
     def run_until(self, Tf, dt):
         if not self.initialized:
